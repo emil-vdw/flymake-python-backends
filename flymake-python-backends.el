@@ -7,7 +7,7 @@
 (defvar-local flymake-python/mypy--temp-files '())
 
 (defvar flymake-python/mypy--output-regex
-  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(.+\\) \\(\\[.+\\]\\)$"
+  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\): \\(.+?\\) ?\\(\\[.+\\]\\)?$"
   "Regular expression to parse 'mypy' output for file, line, column, type, and message.")
 
 (defvar flymake-python/flake8--output-regex
@@ -17,7 +17,6 @@
 (defvar flymake-python/pylint--output-regex
   "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\): \\(.+\\)$"
   "Regular expression to parse 'pylint' output for file, line, column, type, and message.")
-
 
 (defun flymake-python-backends/plist-get-required (plist prop)
   "Retrieve PROP from PLIST or signal an error if PROP is missing.
@@ -52,7 +51,6 @@ Returns the file name of the temporary file."
     (make-directory (file-name-directory file-name) t)
     (write-region nil nil file-name nil 0)
     file-name))
-
 
 (defmacro flymake-python-backends/define-backend-sentinel (proc-var output-parse-fn source)
   "Define a sentinel for a process using PROC-VAR, OUTPUT-PARSE-FN, and SOURCE.
@@ -154,7 +152,9 @@ and reports them to Flymake."
                ;; When the checker process is checking the actual file
                ;; associated with the buffer, only continue if there are no
                ;; unsaved changes.
-               (flymake-log :warning "Canceling %s check because file is not saved" ,backend-name)
+               (flymake-log :warning
+                            "Canceling %s check because file is not saved"
+                            ,backend-name)
              
              (setq ,proc-var
                    (make-process
@@ -189,10 +189,13 @@ This backend checks Python files using 'mypy' and parses the output."
         (when (search-forward-regexp flymake-python/mypy--output-regex nil t)
           (let* ((line (string-to-number (match-string 2)))
                  (col (string-to-number (match-string 3)))
-                 (type (match-string 5))
-                 (message (match-string 4))
-                 (description (format "mypy %s: %s" type message)))
-            `(:line ,line :col ,col :type ,type :message ,message :description ,description :severity :error))))))
+                 (type (match-string 6))
+                 (message (match-string 5))
+                 (description (if type
+                                  (format "mypy %s: %s" type message)
+                                (format "mypy: %s" message)))
+                 (severity (intern (concat ":" (match-string 4)))))
+            `(:line ,line :col ,col :type ,type :message ,message :description ,description :severity ,severity))))))
 
 (defun flymake-python-backends/flake8 (report-fn &rest _args)
   "Flymake backend for 'flake8'.
@@ -223,7 +226,7 @@ This backend checks Python files using 'pylint' and parses the output."
       :report-fn report-fn
       :backend-name "pylint"
       :executable "pylint"
-      :command ("pylint" "--from-stdin" "stdin")
+      :command ("pylint")
       :proc-var flymake-python/pylint--proc
       :output-parse-fn
       (lambda ()

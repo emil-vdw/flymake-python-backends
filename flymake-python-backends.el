@@ -7,24 +7,32 @@
 (defvar-local flymake-python/mypy--temp-files '())
 
 (defvar flymake-python/mypy--output-regex
-  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(.+\\) \\(\\[.+\\]\\)$")
+  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(.+\\) \\(\\[.+\\]\\)$"
+  "Regular expression to parse 'mypy' output for file, line, column, type, and message.")
 
 (defvar flymake-python/flake8--output-regex
-  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\) \\(.+\\)$")
+  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\) \\(.+\\)$"
+  "Regular expression to parse 'flake8' output for file, line, column, type, and message.")
 
 (defvar flymake-python/pylint--output-regex
-  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\): \\(.+\\)$")
+  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\): \\(.+\\)$"
+  "Regular expression to parse 'pylint' output for file, line, column, type, and message.")
 
 
 (defun flymake-python-backends/plist-get-required (plist prop)
-  "Get PROP from PLIST, or error if PROP is missing."
+  "Retrieve PROP from PLIST or signal an error if PROP is missing.
+
+This is useful for retrieving required properties from a plist.
+An error is signaled if PROP is not found in PLIST."
   (let ((value (plist-get plist prop)))
     (if value
         value
       (error "Property %s is required but missing" prop))))
 
 (defun flymake-python-backends/buffer-temp-file-name (backend-name)
-  ""
+  "Generate a unique temporary file name for the current buffer using BACKEND-NAME.
+
+This function uses the backend name and a hash of the buffer name to create the temp file."
   (concat
    "flymake-python-"
    backend-name
@@ -32,7 +40,10 @@
               0 16)))
 
 (defun flymake-python-backends/buffer-to-temp-file (backend-name)
-  ""
+  "Write the contents of the current buffer to a temporary file for BACKEND-NAME.
+
+The file is stored in the system's temporary directory and is used by the backend checker.
+Returns the file name of the temporary file."
   (let ((file-name (f-join (temporary-file-directory)
                                (flymake-python-backends/buffer-temp-file-name
                                 backend-name)))
@@ -44,7 +55,11 @@
 
 
 (defmacro flymake-python-backends/define-backend-sentinel (proc-var output-parse-fn source)
-  ""
+  "Define a sentinel for a process using PROC-VAR, OUTPUT-PARSE-FN, and SOURCE.
+
+This macro sets up a sentinel that processes the output of a subprocess, parses
+the diagnostics using OUTPUT-PARSE-FN, and reports them to Flymake.
+SOURCE defines whether the process is checking a real file (:real-file) or a temporary one."
   `(lambda (proc _event)
      (when (memq (process-status proc) '(exit signal))
        (unwind-protect
@@ -90,7 +105,11 @@
                  (funcall report-fn buffer-diagnostics)))))))))
 
 (defmacro flymake-python-backends/define-backend-for-checker (&rest properties)
-  ""
+  "Define a Flymake backend using the given PROPERTIES.
+
+The properties must include at least :report-fn, :backend-name, :proc-var, and :output-parse-fn.
+This macro creates a Flymake backend that runs an external checker, collects diagnostics,
+and reports them to Flymake."
   (declare (indent 1))
   (let* ((report-fn (flymake-python-backends/plist-get-required properties :report-fn))
          (backend-name
@@ -154,6 +173,10 @@
              (process-put ,proc-var 'report-fn ,report-fn)))))))
 
 (defun flymake-python-backends/mypy (report-fn &rest _args)
+  "Flymake backend for 'mypy'.
+
+REPORT-FN is the function used to report diagnostics to Flymake.
+This backend checks Python files using 'mypy' and parses the output."
   (flymake-python-backends/define-backend-for-checker
       :report-fn report-fn
       :backend-name "mypy"
@@ -172,6 +195,10 @@
             `(:line ,line :col ,col :type ,type :message ,message :description ,description :severity :error))))))
 
 (defun flymake-python-backends/flake8 (report-fn &rest _args)
+  "Flymake backend for 'flake8'.
+
+REPORT-FN is the function used to report diagnostics to Flymake.
+This backend checks Python files using 'flake8' and parses the output."
   (flymake-python-backends/define-backend-for-checker
       :report-fn report-fn
       :backend-name "flake8"
@@ -188,6 +215,10 @@
             `(:line ,line :col ,col :type ,type :message ,message :description ,description :severity :error))))))
 
 (defun flymake-python-backends/pylint (report-fn &rest _args)
+  "Flymake backend for 'pylint'.
+
+REPORT-FN is the function used to report diagnostics to Flymake.
+This backend checks Python files using 'pylint' and parses the output."
   (flymake-python-backends/define-backend-for-checker
       :report-fn report-fn
       :backend-name "pylint"

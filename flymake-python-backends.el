@@ -15,6 +15,14 @@
 (defvar flymake-python/pylint--output-regex
   "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\): \\(.+\\)$")
 
+
+(defun flymake-python-backends/plist-get-required (plist prop)
+  "Get PROP from PLIST, or error if PROP is missing."
+  (let ((value (plist-get plist prop)))
+    (if value
+        value
+      (error "Property %s is required but missing" prop))))
+
 (defun flymake-python-backends/buffer-temp-file-name (backend-name)
   ""
   (concat
@@ -35,17 +43,71 @@
     file-name))
 
 
-(defmacro flymake-python-backends/run-backend-for-checker
-    (backend-name
-     executable
-     backend-command
-     proc-var
-     output-parse-fn
-     severity)
+(defmacro flymake-python-backends/define-backend-sentinel (proc-var output-parse-fn source)
+  ""
+  `(lambda (proc _event)
+     (when (memq (process-status proc) '(exit signal))
+       (unwind-protect
+           (let ((source-buffer (process-get proc 'source-buffer))
+                 (report-fn (process-get proc 'report-fn))
+                 (buffer-diagnostics '()))
 
-  (let ((backend-fn-name (intern (format "flymake-python-backends/%s" backend-name)))
-        (process-name (format "%s-flymake" backend-name))
-        (process-buffer-name (format " *%s-flymake*" backend-name)))
+             (cond
+              ;; Check whether this callback is for the most recent checker
+              ;; process.
+              ((not (with-current-buffer source-buffer (eq proc ,proc-var)))
+               (flymake-log :warning "Canceling obsolete check %s" proc))
+
+              ;; If the file the checker is checking is the actual source file
+              ;; associated with the buffer, only report diagnostics if the
+              ;; buffer hasn't been modified since the check began (i.e. there
+              ;; are no unsaved changes).  Otherwise the line and column numbers
+              ;; will not be accurate, or we might report errors that aren't
+              ;; present anymore.
+              ((and (eq ,source :real-file)
+                    (buffer-modified-p))
+               (flymake-log :warning "Canceling report because file is not saved %s" proc))
+
+              (t
+               ;; Safe to continue parsing and reporting.
+               (with-current-buffer (process-buffer proc)
+                 (goto-char (point-min))
+                 (while-let ((checker-result (,output-parse-fn)))
+                   (let* ((region (flymake-diag-region
+                                   source-buffer
+                                   (plist-get checker-result :line)
+                                   (plist-get checker-result :col)))
+                          (diag (flymake-make-diagnostic
+                                 source-buffer
+                                 (car region)
+                                 (cdr region)
+                                 (plist-get checker-result :severity)
+                                 (plist-get checker-result :description))))
+
+                     (add-to-list 'buffer-diagnostics diag)))
+
+                 (kill-buffer (process-buffer proc))
+                 (funcall report-fn buffer-diagnostics)))))))))
+
+(defmacro flymake-python-backends/define-backend-for-checker (&rest properties)
+  ""
+  (declare (indent 1))
+  (let* ((report-fn (flymake-python-backends/plist-get-required properties :report-fn))
+         (backend-name
+          (flymake-python-backends/plist-get-required properties :backend-name))
+         (executable
+          (or (plist-get properties :executable)
+              backend-name))
+         (backend-command (or (plist-get properties :command)
+                              (list executable)))
+         (proc-var
+          (flymake-python-backends/plist-get-required properties :proc-var))
+         (output-parse-fn
+          (flymake-python-backends/plist-get-required properties :output-parse-fn))
+         (source (or (plist-get properties :source)
+                     :temp-file))
+         (process-name (format "%s-flymake" backend-name))
+         (process-buffer-name (format " *%s-flymake*" backend-name)))
     `(progn
        (unless (executable-find ,executable)
          (error "Cannot find a %s executable" ,executable))
@@ -60,97 +122,88 @@
        ;; narrowing restriction.
        (save-restriction
          (widen)
-         (let ((buffer-temp-file
-                (flymake-python-backends/buffer-to-temp-file ,backend-name)))
-           (setq ,proc-var
-                 (make-process
-                  :name ,process-name
-                  :noquery t
-                  :connection-type 'pipe
-                  :buffer (generate-new-buffer ,process-buffer-name)
-                  :command (list ,@backend-command buffer-temp-file)
-                  :sentinel
-                  (lambda (proc _event)
-                    (when (memq (process-status proc) '(exit signal))
-                      (unwind-protect
-                          (let ((source-buffer (process-get proc 'source-buffer))
-                                (report-fn (process-get proc 'report-fn))
-                                (buffer-diagnostics '()))
-                            (if (with-current-buffer source-buffer (eq proc ,proc-var))
-                                (with-current-buffer (process-buffer proc)
-                                  (goto-char (point-min))
-                                  (while-let ((checker-result (,output-parse-fn)))
-                                    (let* ((region (flymake-diag-region
-                                                    source-buffer
-                                                    (plist-get checker-result :line)
-                                                    (plist-get checker-result :col)))
-                                           (diag (flymake-make-diagnostic
-                                                  source-buffer
-                                                  (car region)
-                                                  (cdr region)
-                                                  ,severity
-                                                  (plist-get checker-result :description))))
-                                      (add-to-list 'buffer-diagnostics diag)))
+         
+         (let ((file-to-check
+                (pcase ,source
+                  (:real-file (expand-file-name buffer-file-name))
+                  (:temp-file (flymake-python-backends/buffer-to-temp-file ,backend-name))
+                  (_ (flymake-python-backends/buffer-to-temp-file ,backend-name)))))
 
-                                  (kill-buffer (process-buffer proc))
-
-                                  (ignore-errors
-                                    (delete-file buffer-temp-file))
-
-                                  (funcall report-fn buffer-diagnostics))
-
-                              (flymake-log :warning "Canceling obsolete check %s" proc))))))))
-           (process-put ,proc-var 'source-buffer (current-buffer))
-           (process-put ,proc-var 'report-fn report-fn))))))
+           (if (or (not file-to-check)
+                   (and (eq ,source :real-file)
+                        (buffer-modified-p)))
+               ;; When the checker process is checking the actual file
+               ;; associated with the buffer, only continue if there are no
+               ;; unsaved changes.
+               (flymake-log :warning "Canceling %s check because file is not saved" ,backend-name)
+             
+             (setq ,proc-var
+                   (make-process
+                    :name ,process-name
+                    :noquery t
+                    :connection-type 'pipe
+                    :buffer (generate-new-buffer ,process-buffer-name)
+                    :command (list ,@backend-command file-to-check)
+                    :sentinel
+                    (flymake-python-backends/define-backend-sentinel
+                        ,proc-var ,output-parse-fn ,source)))
+             
+             ;; Attach some important data to the process object for use by the
+             ;; sentinal later.
+             (process-put ,proc-var 'source-buffer (current-buffer))
+             (process-put ,proc-var 'report-fn ,report-fn)))))))
 
 (defun flymake-python-backends/mypy (report-fn &rest _args)
-  (flymake-python-backends/run-backend-for-checker
-   "mypy"
-   "mypy"
-   ("mypy" "--show-column-numbers")
-   flymake-python/mypy--proc
-   (lambda ()
-     (when (search-forward-regexp flymake-python/mypy--output-regex nil t)
-       (let* ((line (string-to-number (match-string 2)))
-              (col (string-to-number (match-string 3)))
-              (type (match-string 5))
-              (message (match-string 4))
-              (description (format "mypy %s: %s" type message)))
-         `(:line ,line :col ,col :type ,type :message ,message :description ,description))))
-   :error))
+  (flymake-python-backends/define-backend-for-checker
+      :report-fn report-fn
+      :backend-name "mypy"
+      :source :real-file
+      :executable "mypy"
+      :command ("mypy" "--show-column-numbers")
+      :proc-var flymake-python/mypy--proc
+      :output-parse-fn
+      (lambda ()
+        (when (search-forward-regexp flymake-python/mypy--output-regex nil t)
+          (let* ((line (string-to-number (match-string 2)))
+                 (col (string-to-number (match-string 3)))
+                 (type (match-string 5))
+                 (message (match-string 4))
+                 (description (format "mypy %s: %s" type message)))
+            `(:line ,line :col ,col :type ,type :message ,message :description ,description :severity :error))))))
 
 (defun flymake-python-backends/flake8 (report-fn &rest _args)
-  (flymake-python-backends/run-backend-for-checker
-   "flake8"
-   "flake8"
-   ("flake8")
-   flymake-python/flake8--proc
-   (lambda ()
-     (when (search-forward-regexp flymake-python/flake8--output-regex nil t)
-       (let* ((line (string-to-number (match-string 2)))
-              (col (string-to-number (match-string 3)))
-              (type (match-string 4))
-              (message (match-string 5))
-              (description (format "flake8 %s: %s" type message)))
-         `(:line ,line :col ,col :type ,type :message ,message :description ,description))))
-   :error))
+  (flymake-python-backends/define-backend-for-checker
+      :report-fn report-fn
+      :backend-name "flake8"
+      :command ("flake8")
+      :proc-var flymake-python/flake8--proc
+      :output-parse-fn
+      (lambda ()
+        (when (search-forward-regexp flymake-python/flake8--output-regex nil t)
+          (let* ((line (string-to-number (match-string 2)))
+                 (col (string-to-number (match-string 3)))
+                 (type (match-string 4))
+                 (message (match-string 5))
+                 (description (format "flake8 %s: %s" type message)))
+            `(:line ,line :col ,col :type ,type :message ,message :description ,description :severity :error))))))
 
 (defun flymake-python-backends/pylint (report-fn &rest _args)
-  (flymake-python-backends/run-backend-for-checker
-   "pylint"
-   "pylint"
-   ("pylint" "--disable=C0103")
-   flymake-python/pylint--proc
-   (lambda ()
-     (when (search-forward-regexp flymake-python/pylint--output-regex nil t)
-       (let* ((line (string-to-number (match-string 2)))
-              ;; Pylint columns start at 0.
-              (col (1+ (string-to-number (match-string 3))))
-              (type (match-string 4))
-              (message (match-string 5))
-              (description (format "pylint %s: %s" type message)))
-         `(:line ,line :col ,col :type ,type :message ,message :description ,description))))
-   :error))
+  (flymake-python-backends/define-backend-for-checker
+      :report-fn report-fn
+      :backend-name "pylint"
+      :executable "pylint"
+      :command ("pylint" "--from-stdin" "stdin")
+      :proc-var flymake-python/pylint--proc
+      :output-parse-fn
+      (lambda ()
+        (when (search-forward-regexp flymake-python/pylint--output-regex nil t)
+          (let* ((line (string-to-number (match-string 2)))
+                 ;; Pylint columns start at 0.
+                 (col (1+ (string-to-number (match-string 3))))
+                 (type (match-string 4))
+                 (message (match-string 5))
+                 (description (format "pylint %s: %s" type message)))
+            `(:line ,line :col ,col :type ,type :message ,message :description ,description :severity :error))))))
 
 (defun ruby-setup-flymake-backend ()
   (add-hook 'flymake-diagnostic-functions 'ruby-flymake nil t))

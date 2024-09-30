@@ -239,4 +239,14 @@ This backend checks Python files using 'pylint' and parses the output."
                  (description (format "pylint %s: %s" type message)))
             `(:line ,line :col ,col :type ,type :message ,message :description ,description :severity :error))))))
 
+(defun flymake-python-backends/setup-mypy-flymake-backend ()
+       (add-hook 'flymake-diagnostic-functions 'flymake-python-backends/mypy nil t))
+
+(defun flymake-python-backends/setup-flake8-flymake-backend ()
+       (add-hook 'flymake-diagnostic-functions 'flymake-python-backends/flake8 nil t))
+
+(defun flymake-python-backends/setup-pylint-flymake-backend ()
+       (add-hook 'flymake-diagnostic-functions 'flymake-python-backends/pylint nil t))
+
+
 (provide 'flymake-python-backends)

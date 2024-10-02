@@ -4,7 +4,17 @@
 (defvar-local flymake-python/flake8--proc nil)
 (defvar-local flymake-python/pylint--proc nil)
 
-(defvar-local flymake-python/mypy--temp-files '())
+(defcustom flymake-python/mypy-command
+  '("mypy" "--show-column-numbers")
+  "")
+
+(defcustom flymake-python/flake8-command
+  '("flake8")
+  "")
+
+(defcustom flymake-python/pylint-command
+  '("pylint")
+  "")
 
 (defvar flymake-python/mypy--output-regex
   "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\): \\(.+?\\) ?\\(\\[.+\\]\\)?$"
@@ -115,8 +125,8 @@ and reports them to Flymake."
          (executable
           (or (plist-get properties :executable)
               backend-name))
-         (backend-command (or (plist-get properties :command)
-                              (list executable)))
+         (command (or (plist-get properties :command)
+                      (list executable)))
          (proc-var
           (flymake-python-backends/plist-get-required properties :proc-var))
          (output-parse-fn
@@ -125,6 +135,7 @@ and reports them to Flymake."
                      :temp-file))
          (process-name (format "%s-flymake" backend-name))
          (process-buffer-name (format " *%s-flymake*" backend-name)))
+
     `(progn
        (unless (executable-find ,executable)
          (error "Cannot find a %s executable" ,executable))
@@ -140,11 +151,24 @@ and reports them to Flymake."
        (save-restriction
          (widen)
          
-         (let ((file-to-check
-                (pcase ,source
-                  (:real-file (expand-file-name buffer-file-name))
-                  (:temp-file (flymake-python-backends/buffer-to-temp-file ,backend-name))
-                  (_ (flymake-python-backends/buffer-to-temp-file ,backend-name)))))
+         (let* ((file-to-check
+                 (pcase ,source
+                   (:real-file (expand-file-name buffer-file-name))
+                   (:temp-file (flymake-python-backends/buffer-to-temp-file ,backend-name))
+                   (_ (flymake-python-backends/buffer-to-temp-file ,backend-name))))
+                (command-arg ,command)
+                (backend-command
+                 (cond
+                  ;; Command is a variable, retrieve its value.
+                  ((and (eq (type-of command-arg) 'symbol)
+                        (boundp command-arg))
+                   (symbol-value command-arg))
+                  ;; Command is a function, call it to use it's return value.
+                  ((and (eq (type-of command-arg) 'symbol)
+                        (fboundp command-arg))
+                   (funcall command-arg))
+                  ;; Default to the literal value passed to the macro.
+                  (t command-arg))))
 
            (if (or (not file-to-check)
                    (and (eq ,source :real-file)
@@ -162,10 +186,10 @@ and reports them to Flymake."
                     :noquery t
                     :connection-type 'pipe
                     :buffer (generate-new-buffer ,process-buffer-name)
-                    :command (list ,@backend-command file-to-check)
+                    :command (append backend-command (list file-to-check))
                     :sentinel
                     (flymake-python-backends/define-backend-sentinel
-                        ,proc-var ,output-parse-fn ,source)))
+                     ,proc-var ,output-parse-fn ,source)))
              
              ;; Attach some important data to the process object for use by the
              ;; sentinal later.
@@ -182,7 +206,7 @@ This backend checks Python files using 'mypy' and parses the output."
       :backend-name "mypy"
       :source :real-file
       :executable "mypy"
-      :command ("mypy" "--show-column-numbers")
+      :command flymake-python/mypy-command
       :proc-var flymake-python/mypy--proc
       :output-parse-fn
       (lambda ()
@@ -205,7 +229,7 @@ This backend checks Python files using 'flake8' and parses the output."
   (flymake-python-backends/define-backend-for-checker
       :report-fn report-fn
       :backend-name "flake8"
-      :command ("flake8")
+      :command flymake-python/flake8-command
       :proc-var flymake-python/flake8--proc
       :output-parse-fn
       (lambda ()
@@ -225,8 +249,9 @@ This backend checks Python files using 'pylint' and parses the output."
   (flymake-python-backends/define-backend-for-checker
       :report-fn report-fn
       :backend-name "pylint"
+      :source :real-file
       :executable "pylint"
-      :command ("pylint")
+      :command flymake-python/pylint-command
       :proc-var flymake-python/pylint--proc
       :output-parse-fn
       (lambda ()
@@ -240,13 +265,13 @@ This backend checks Python files using 'pylint' and parses the output."
             `(:line ,line :col ,col :type ,type :message ,message :description ,description :severity :error))))))
 
 (defun flymake-python-backends/setup-mypy-flymake-backend ()
-       (add-hook 'flymake-diagnostic-functions 'flymake-python-backends/mypy nil t))
+  (add-hook 'flymake-diagnostic-functions 'flymake-python-backends/mypy nil t))
 
 (defun flymake-python-backends/setup-flake8-flymake-backend ()
-       (add-hook 'flymake-diagnostic-functions 'flymake-python-backends/flake8 nil t))
+  (add-hook 'flymake-diagnostic-functions 'flymake-python-backends/flake8 nil t))
 
 (defun flymake-python-backends/setup-pylint-flymake-backend ()
-       (add-hook 'flymake-diagnostic-functions 'flymake-python-backends/pylint nil t))
+  (add-hook 'flymake-diagnostic-functions 'flymake-python-backends/pylint nil t))
 
 
 (provide 'flymake-python-backends)

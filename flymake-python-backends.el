@@ -1,3 +1,23 @@
+;;; flymake-python-backends.el --- Flymake backends for Python linters  -*- lexical-binding: t; -*-
+
+;; Author: Emil van der Westhuizen <vdwemil@protonmail.com>
+;; Maintainer: Emil van der Westhuizen <vdwemil@protonmail.com>
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "26.1") (f "0.20.0"))
+;; Homepage: https://github.com/emil-vdw/flymake-python-backends
+;; Keywords: languages, tools, linting
+
+;; This file is not part of GNU Emacs.
+
+;;; Commentary:
+
+;; An Emacs package providing Flymake backends for Python using 'mypy', 'flake8', and 'pylint'.
+;; It integrates these tools with Flymake to provide real-time syntax checking and linting
+;; as you write Python code.
+
+;; For installation and usage instructions, please refer to the README.md file.
+
+;;; Code:
 (require 'f)
 
 (defvar-local flymake-python/mypy--proc nil)
@@ -6,15 +26,15 @@
 
 (defcustom flymake-python/mypy-command
   '("mypy" "--show-column-numbers")
-  "")
+  "Mypy command that the flymake backend will use.")
 
 (defcustom flymake-python/flake8-command
   '("flake8")
-  "")
+  "flake8 command that the flymake backend will use.")
 
 (defcustom flymake-python/pylint-command
   '("pylint")
-  "")
+  "Pyling command that the flymake backend will use.")
 
 (defvar flymake-python/mypy--output-regex
   "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\): \\(.+?\\) ?\\(\\[.+\\]\\)?$"
@@ -275,3 +295,5 @@ This backend checks Python files using 'pylint' and parses the output."
 
 
 (provide 'flymake-python-backends)
+
+;;; flymake-python-backends.el ends here

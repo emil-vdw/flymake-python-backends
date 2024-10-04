@@ -20,31 +20,34 @@
 ;;; Code:
 (require 'f)
 
-(defvar-local flymake-python/mypy--proc nil)
-(defvar-local flymake-python/flake8--proc nil)
-(defvar-local flymake-python/pylint--proc nil)
+(defvar-local flymake-python-backends/mypy--proc nil)
+(defvar-local flymake-python-backends/flake8--proc nil)
+(defvar-local flymake-python-backends/pylint--proc nil)
 
-(defcustom flymake-python/mypy-command
+(defcustom flymake-python-backends/mypy-command
   '("mypy" "--show-column-numbers")
-  "Mypy command that the flymake backend will use.")
+  "Mypy command that the flymake backend will use."
+  :group 'flymake-python-backends)
 
-(defcustom flymake-python/flake8-command
+(defcustom flymake-python-backends/flake8-command
   '("flake8")
-  "flake8 command that the flymake backend will use.")
+  "flake8 command that the flymake backend will use."
+  :group 'flymake-python-backends)
 
-(defcustom flymake-python/pylint-command
+(defcustom flymake-python-backends/pylint-command
   '("pylint")
-  "Pyling command that the flymake backend will use.")
+  "Pyling command that the flymake backend will use."
+  :group 'flymake-python-backends)
 
-(defvar flymake-python/mypy--output-regex
+(defvar flymake-python-backends/mypy--output-regex
   "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\): \\(.+?\\) ?\\(\\[.+\\]\\)?$"
   "Regular expression to parse 'mypy' output for file, line, column, type, and message.")
 
-(defvar flymake-python/flake8--output-regex
+(defvar flymake-python-backends/flake8--output-regex
   "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\) \\(.+\\)$"
   "Regular expression to parse 'flake8' output for file, line, column, type, and message.")
 
-(defvar flymake-python/pylint--output-regex
+(defvar flymake-python-backends/pylint--output-regex
   "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(\\w+\\): \\(.+\\)$"
   "Regular expression to parse 'pylint' output for file, line, column, type, and message.")
 
@@ -226,11 +229,11 @@ This backend checks Python files using 'mypy' and parses the output."
       :backend-name "mypy"
       :source :real-file
       :executable "mypy"
-      :command flymake-python/mypy-command
-      :proc-var flymake-python/mypy--proc
+      :command flymake-python-backends/mypy-command
+      :proc-var flymake-python-backends/mypy--proc
       :output-parse-fn
       (lambda ()
-        (when (search-forward-regexp flymake-python/mypy--output-regex nil t)
+        (when (search-forward-regexp flymake-python-backends/mypy--output-regex nil t)
           (let* ((line (string-to-number (match-string 2)))
                  (col (string-to-number (match-string 3)))
                  (type (match-string 6))
@@ -249,11 +252,11 @@ This backend checks Python files using 'flake8' and parses the output."
   (flymake-python-backends/define-backend-for-checker
       :report-fn report-fn
       :backend-name "flake8"
-      :command flymake-python/flake8-command
-      :proc-var flymake-python/flake8--proc
+      :command flymake-python-backends/flake8-command
+      :proc-var flymake-python-backends/flake8--proc
       :output-parse-fn
       (lambda ()
-        (when (search-forward-regexp flymake-python/flake8--output-regex nil t)
+        (when (search-forward-regexp flymake-python-backends/flake8--output-regex nil t)
           (let* ((line (string-to-number (match-string 2)))
                  (col (string-to-number (match-string 3)))
                  (type (match-string 4))
@@ -271,11 +274,11 @@ This backend checks Python files using 'pylint' and parses the output."
       :backend-name "pylint"
       :source :real-file
       :executable "pylint"
-      :command flymake-python/pylint-command
-      :proc-var flymake-python/pylint--proc
+      :command flymake-python-backends/pylint-command
+      :proc-var flymake-python-backends/pylint--proc
       :output-parse-fn
       (lambda ()
-        (when (search-forward-regexp flymake-python/pylint--output-regex nil t)
+        (when (search-forward-regexp flymake-python-backends/pylint--output-regex nil t)
           (let* ((line (string-to-number (match-string 2)))
                  ;; Pylint columns start at 0.
                  (col (1+ (string-to-number (match-string 3))))
